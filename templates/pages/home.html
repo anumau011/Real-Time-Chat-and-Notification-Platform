@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block head %}
+    <script src="{% static 'js/chat.js' %}?v=7" defer></script>
+    <style>
+        .chat-container { height: calc(100vh - 3rem); }
+        .sidebar { width: 300px; border-right: 1px solid #e5e7eb; background-color: #f9fafb; }
+        .chat-area { flex: 1; background-color: #ffffff; }
+        .message-container { height: calc(100% - 120px); }
+        .online-status {
+            width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-left: 5px;
+        }
+        .online { background-color: #10b981; }
+        .offline { background-color: #9ca3af; }
+        .message-seen { display: inline-flex; margin-left: 5px; }
+        .message-seen svg { width: 16px; height: 16px; }
+        .typing-indicator { display: flex; align-items: center; gap: 4px; font-size: 0.875rem; color: #6b7280; }
+        .typing-dot {
+            width: 6px; height: 6px; background-color: #8dafdd; border-radius: 50%;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+        .typing-dot:nth-child(1) { animation-delay: 0s; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-4px); }
+        }
+        .chatroom-item.active { background-color: rgba(141, 175, 221, 0.1); }
+        .emoji-picker {
+            position: absolute; bottom: 60px; right: 20px; z-index: 100;
+            background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 8px; max-height: 300px; overflow-y: auto;
+        }
+        .unread-count {
+            background-color: #ff4d4f; color: white; border-radius: 9999px;
+            padding: 2px 8px; font-size: 0.75rem; font-weight: 600;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="flex chat-container">
+    <!-- Sidebar -->
+    <div class="sidebar flex flex-col">
+        <!-- User Profile -->
+        <div class="p-4 border-b border-gray-200 flex items-center gap-3">
+            <div class="relative">
+                <img src="{% if request.user.profile_image %}{{ request.user.profile_image.url }}{% else %}{% static 'img/avatar.png' %}{% endif %}" 
+                     class="w-10 h-10 rounded-full object-cover sidebar-profile-img">
+                <span class="online-status online"></span>
+            </div>
+            <div class="flex-1">
+                <div class="font-medium sidebar-profile-name">{{ request.user.get_full_name|default:request.user.email }}</div>
+                <div class="text-xs text-gray-500">Online</div>
+            </div>
+            <button class="text-gray-500 hover:text-primary" data-bs-toggle="modal" data-bs-target="#profileSettingsModal">
+                <i class="bi bi-gear"></i>
+            </button>
+        </div>
+        
+        <!-- Search -->
+        <div class="p-3 border-b border-gray-200">
+            <div class="relative">
+                <input type="text" placeholder="Search chats..." class="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                <i class="bi bi-search absolute left-3 top-2.5 text-gray-400"></i>
+            </div>
+        </div>
+        
+        <!-- Chat List -->
+        <div class="flex-1 overflow-y-auto">
+            <div class="p-3">
+                <button class="w-full bg-primary hover:bg-primary-hover text-white py-2 px-4 rounded-lg flex items-center justify-center gap-2" data-bs-toggle="modal" data-bs-target="#startChatModal">
+                    <i class="bi bi-plus-lg"></i> New Chat
+                </button>
+            </div>
+            
+            <div class="space-y-1 px-2" id="chatroom-list">
+                {% for room in chatrooms %}
+                <div class="chatroom-item p-3 rounded-lg hover:bg-gray-100 cursor-pointer flex items-center gap-3 {% if room.id == selected_room_id %}active{% endif %}" data-room-id="{{ room.id }}">
+                    <div class="relative">
+                        {% if room.is_group %}
+                            <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                                <i class="bi bi-people-fill"></i>
+                            </div>
+                        {% else %}
+                            {% if room.other_user %}
+                                <img src="{% if room.other_user.profile_image %}{{ room.other_user.profile_image.url }}{% else %}{% static 'img/avatar.png' %}{% endif %}" 
+                                     class="w-10 h-10 rounded-full object-cover">
+                            {% else %}
+                                <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                    <i class="bi bi-person"></i>
+                                </div>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-medium truncate">{{ room.display_name }}</div>
+                        <div class="text-xs text-gray-500 truncate">
+                            {% if room.last_message %}
+                                {{ room.last_message.content|truncatechars:30 }}
+                            {% else %}
+                                No messages yet
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="text-xs text-gray-500 flex flex-col items-end">
+                        {% if room.last_message and room.last_message.created %}
+                            {{ room.last_message.created|date:"H:i" }}
+                        {% else %}
+                            --
+                        {% endif %}
+                        {% if room.unread_count > 0 %}
+                            <span class="unread-count mt-1">{{ room.unread_count }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Main Chat Area -->
+    <div class="chat-area flex flex-col">
+        <!-- Chat Header -->
+        <div class="p-4 border-b border-gray-200 flex items-center gap-3">
+            <div class="relative">
+                <img id="chat-avatar" src="{% static 'img/avatar.png' %}" class="w-10 h-10 rounded-full object-cover">
+                <span id="chat-status-dot" class="online-status offline"></span>
+            </div>
+            <div class="flex-1">
+                <div class="font-medium" id="chat-header">Select a chat</div>
+                <div class="text-xs text-gray-500" id="chat-status">
+                    <span id="typing-indicator" class="typing-indicator"></span>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center">
+                    <i class="bi bi-telephone"></i>
+                </button>
+                <button class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center">
+                    <i class="bi bi-camera-video"></i>
+                </button>
+                <button class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Messages Container -->
+        <div class="message-container overflow-y-auto p-4" id="messages-container">
+            <div class="text-center text-gray-500 py-10">
+                Select a chat to start messaging
+            </div>
+        </div>
+        
+        <!-- Message Input -->
+        <div class="p-4 border-t border-gray-200 bg-white">
+            <form id="message-form" class="flex gap-2 relative">
+                {% csrf_token %}
+                <div class="flex-1 relative">
+                    <input type="text" id="message-input" class="w-full pl-4 pr-10 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="Type a message...">
+                    <button type="button" id="emoji-button" class="absolute right-2 top-2 text-gray-400 hover:text-primary">
+                        <i class="bi bi-emoji-smile"></i>
+                    </button>
+                </div>
+                <button type="submit" class="w-10 h-10 bg-primary hover:bg-primary-hover text-white rounded-full flex items-center justify-center">
+                    <i class="bi bi-send"></i>
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Start Chat Modal -->
+<div class="modal fade" id="startChatModal" tabindex="-1" aria-labelledby="startChatModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="startChatModalLabel">Start a New Chat</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="start-chat-form" action="{% url 'create_room' %}" method="POST">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="user-select" class="form-label">Select Users</label>
+                        <select id="user-select" name="user_ids[]" class="form-select" multiple>
+                            <!-- Options will be populated dynamically -->
+                        </select>
+                    </div>
+                    <button type="submit" class="btn auth-primary">Start Chat</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Profile Settings Modal -->
+<div class="modal fade" id="profileSettingsModal" tabindex="-1" aria-labelledby="profileSettingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="profileSettingsModalLabel">Profile Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="profile-settings-form" action="{% url 'update_profile' %}" method="POST" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" id="username" name="username" class="form-control" value="{{ request.user.username|default:'' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="first_name" class="form-label">First Name</label>
+                        <input type="text" id="first_name" name="first_name" class="form-control" value="{{ request.user.first_name|default:'' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="last_name" class="form-label">Last Name</label>
+                        <input type="text" id="last_name" name="last_name" class="form-control" value="{{ request.user.last_name|default:'' }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="profile_image" class="form-label">Profile Image</label>
+                        <input type="file" id="profile_image" name="profile_image" class="form-control" accept="image/*">
+                    </div>
+                    <button type="submit" class="btn auth-primary">Save Changes</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM loaded, initializing chat functionality');
+        // Initialize ChatManager first
+        window.chatManager = new ChatManager();
+        
+        const userSelect = document.getElementById('user-select');
+        if (!userSelect) {
+            console.error('user-select element not found');
+            window.toastManager.buildToast()
+                .setMessage('Error: User select dropdown not found.')
+                .setType('danger')
+                .setPosition('top-right')
+                .show();
+            return;
+        }
+        const startChatForm = document.getElementById('start-chat-form');
+        const profileSettingsForm = document.getElementById('profile-settings-form');
+        const currentUserEmail = document.querySelector('meta[name="user-email"]').content;
+        console.log('Current user email:', currentUserEmail);
+
+        // Prevent duplicate event listeners
+        const clearFormListeners = (form) => {
+            console.log('Clearing listeners for form:', form.id);
+            const newForm = form.cloneNode(true);
+            form.parentNode.replaceChild(newForm, form);
+            return newForm;
+        };
+
+        // Reassign forms to prevent duplicate listeners
+        const updatedStartChatForm = clearFormListeners(startChatForm);
+        const updatedProfileSettingsForm = clearFormListeners(profileSettingsForm);
+
+        // Fetch users and existing rooms
+        console.log('Fetching users and chatrooms from:', '{% url "chat_home" %}');
+        fetch('{% url "chat_home" %}', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(response => {
+            console.log('Fetch response status:', response.status, response.statusText);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status} ${response.statusText}`);
+            return response.json();
+        })
+        .then(data => {
+            console.log('Received data:', data);
+            const oneOnOneUserIds = new Set();
+            data.chatrooms.forEach(room => {
+                console.log('Processing room:', room.id, 'is_group:', room.is_group);
+                if (!room.is_group) {
+                    const otherUser = room.participants.find(p => p.email !== currentUserEmail);
+                    if (otherUser) {
+                        console.log('Adding one-on-one user ID:', otherUser.id);
+                        oneOnOneUserIds.add(otherUser.id);
+                    }
+                }
+            });
+
+            if (!data.users || data.users.length === 0) {
+                console.warn('No users received in response');
+                window.toastManager.buildToast()
+                    .setMessage('No users available to start a chat.')
+                    .setType('warning')
+                    .setPosition('top-right')
+                    .show();
+                return;
+            }
+
+            console.log('Populating user-select with users:', data.users);
+            data.users.forEach(user => {
+                if (!oneOnOneUserIds.has(user.id)) {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.textContent = user.email || user.first_name || user.id;
+                    userSelect.appendChild(option);
+                }
+            });
+        })
+        .catch(error => {
+            console.error('Error fetching users:', error);
+            window.toastManager.buildToast()
+                .setMessage('Error loading users: ' + error.message)
+                .setType('danger')
+                .setPosition('top-right')
+                .show();
+        });
+
+        // Handle start chat form submission
+        updatedStartChatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            console.log('Start chat form submitted');
+            const selectedUsers = Array.from(userSelect.selectedOptions).map(option => option.value);
+            console.log('Selected user IDs:', selectedUsers);
+            if (selectedUsers.length === 0) {
+                console.warn('No users selected for new chat');
+                window.toastManager.buildToast()
+                    .setMessage('Please select at least one user.')
+                    .setType('warning')
+                    .setPosition('top-right')
+                    .show();
+                return;
+            }
+            const formData = new FormData();
+            selectedUsers.forEach(userId => formData.append('user_ids[]', userId));
+            formData.append('csrfmiddlewaretoken', updatedStartChatForm.querySelector('[name=csrfmiddlewaretoken]').value);
+
+            const submitButton = updatedStartChatForm.querySelector('button[type="submit"]');
+            const originalButtonText = submitButton.innerHTML;
+            submitButton.disabled = true;
+            submitButton.innerHTML = `<span class="loader"></span> ${originalButtonText}`;
+
+            fetch(updatedStartChatForm.action, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            })
+            .then(response => {
+                console.log('Create room response status:', response.status, response.statusText);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status} ${response.statusText}`);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Create room response:', data);
+                if (data.success) {
+                    window.toastManager.buildToast()
+                        .setMessage(data.message)
+                        .setType('success')
+                        .setPosition('top-right')
+                        .show();
+                    const event = new CustomEvent('form-submitted', { detail: data });
+                    updatedStartChatForm.dispatchEvent(event);
+                } else {
+                    window.toastManager.buildToast()
+                        .setMessage(data.message || 'Failed to start chat.')
+                        .setType('danger')
+                        .setPosition('top-right')
+                        .show();
+                }
+            })
+            .catch(error => {
+                console.error('Error submitting start chat form:', error);
+                window.toastManager.buildToast()
+                    .setMessage('Error starting chat: ' + error.message)
+                    .setType('danger')
+                    .setPosition('top-right')
+                    .show();
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalButtonText;
+            });
+        });
+
+        // Handle profile settings form submission
+        updatedProfileSettingsForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            console.log('Profile settings form submitted');
+            const formData = new FormData(updatedProfileSettingsForm);
+            const submitButton = updatedProfileSettingsForm.querySelector('button[type="submit"]');
+            const originalButtonText = submitButton.innerHTML;
+            submitButton.disabled = true;
+            submitButton.innerHTML = `<span class="loader"></span> ${originalButtonText}`;
+
+            fetch(updatedProfileSettingsForm.action, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: formData
+            })
+            .then(response => {
+                console.log('Profile update response status:', response.status, response.statusText);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status} ${response.statusText}`);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Profile update response:', data);
+                if (data.success) {
+                    window.toastManager.buildToast()
+                        .setMessage(data.message)
+                        .setType('success')
+                        .setPosition('top-right')
+                        .show();
+                    const profileImg = document.querySelector('.sidebar-profile-img');
+                    const profileName = document.querySelector('.sidebar-profile-name');
+                    console.log('Profile img element:', profileImg);
+                    console.log('Profile name element:', profileName);
+                    if (profileImg && data.profile_image_url) {
+                        profileImg.src = data.profile_image_url;
+                    } else if (profileImg) {
+                        profileImg.src = '{% static "img/avatar.png" %}';
+                    }
+                    if (profileName) {
+                        profileName.textContent = data.full_name || currentUserEmail;
+                    }
+                    bootstrap.Modal.getInstance(document.getElementById('profileSettingsModal')).hide();
+                } else {
+                    window.toastManager.buildToast()
+                        .setMessage(data.message || 'Failed to update profile.')
+                        .setType('danger')
+                        .setPosition('top-right')
+                        .show();
+                }
+            })
+            .catch(error => {
+                console.error('Error submitting profile form:', error);
+                window.toastManager.buildToast()
+                    .setMessage('Error updating profile: ' + error.message)
+                    .setType('danger')
+                    .setPosition('top-right')
+                    .show();
+            })
+            .finally(() => {
+                submitButton.disabled = false;
+                submitButton.innerHTML = originalButtonText;
+            });
+        });
+
+        // Load room from URL or localStorage
+        const urlParams = new URLSearchParams(window.location.search);
+        const roomId = urlParams.get('room') || localStorage.getItem('selectedRoomId');
+        if (roomId) {
+            console.log('Loading room from URL or localStorage:', roomId);
+            window.chatManager.loadRoom(roomId);
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center p-4">
+    <div class="fixed inset-0 bg-[url('{% static 'img/welcome.jpg' %}')] bg-cover bg-center brightness-50"></div>
+    
+    <div class="relative w-full max-w-4xl bg-white/90 backdrop-blur-sm rounded-2xl shadow-xl overflow-hidden z-10">
+        <div class="grid grid-cols-1 lg:grid-cols-2">
+            <!-- Image Section -->
+            <div class="hidden lg:block relative">
+                <img src="{% static 'img/welcome.jpg' %}" alt="Welcome" class="w-full h-full object-cover">
+                <div class="absolute inset-0 bg-black/40 flex items-center justify-center p-8">
+                    <div class="text-white text-center">
+                        <h1 class="text-4xl font-bold mb-4">Welcome Back</h1>
+                        <p class="text-xl">Connect with your friends and colleagues</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Form Section -->
+            <div class="p-8 sm:p-10">
+                <div class="text-center mb-8">
+                    <h2 class="text-3xl font-bold text-gray-800">Sign In</h2>
+                    <p class="text-gray-600 mt-2">Enter your credentials to continue</p>
+                </div>
+                
+                <form method="POST" action="{% url 'login' %}" class="space-y-5">
+                    {% csrf_token %}
+                    
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                        <input type="email" id="email" name="email" placeholder="your@email.com" 
+                               class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition">
+                    </div>
+                    
+                    <div>
+                        <label for="password" class="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                        <input type="password" id="password" name="password" placeholder="••••••••" 
+                               class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition">
+                    </div>
+                    
+                    <button type="submit" class="w-full auth-primary hover:auth-primary-hover text-white font-medium py-3 px-4 rounded-lg transition flex items-center justify-center gap-2">
+                        <span>Sign In</span>
+                    </button>
+                    
+                    <div class="text-center text-sm text-gray-600 pt-2">
+                        Don't have an account? 
+                        <a href="{% url 'register' %}" class="auth-primary-text font-medium hover:underline">Sign up</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

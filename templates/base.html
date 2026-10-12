@@ -1,0 +1,175 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="user-email" content="{{ request.user.email }}">
+    <meta name="csrfmiddlewaretoken" content="{% csrf_token %}">
+    <title>{% block title %}ChatWave{% endblock %}</title>
+    <link href="{% static 'css/output.css' %}" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/emoji-mart@5.6.0/dist/index.umd.min.js" defer></script>
+    <script src="{% static 'js/common/toast_manager.js' %}?v=3" defer></script>
+    <style>
+        .auth-primary { background-color: rgb(141 175 221); }
+        .auth-primary-hover:hover { background-color: rgb(122 155 199); }
+        .auth-primary-text { color: rgb(141 175 221); }
+        .loader {
+            width: 18px; height: 18px; border: 2px solid #FFF;
+            border-bottom-color: transparent; border-radius: 50%;
+            display: inline-block; box-sizing: border-box;
+            animation: rotation 1s linear infinite;
+        }
+        @keyframes rotation {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        emoji-mart {
+            width: 300px;
+            z-index: 1000;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="font-sans bg-gray-50/50">
+    {% block content %}{% endblock %}
+    <script>
+        class FormHandler {
+            constructor(formElement) {
+                if (formElement.id === 'start-chat-form' || formElement.id === 'message-form' || formElement.id === 'profile-settings-form') return;
+                this.form = formElement;
+                this.submitButton = this.form.querySelector('button[type="submit"]');
+                this.originalButtonText = this.submitButton ? this.submitButton.innerHTML : '';
+                this.init();
+            }
+            init() {
+                if (this.form) {
+                    this.form.addEventListener('submit', this.handleSubmit.bind(this));
+                }
+            }
+            async handleSubmit(e) {
+                e.preventDefault();
+                if (!this.submitButton) {
+                    console.error('Submit button not found');
+                    return;
+                }
+                this.showLoading();
+                const formData = new FormData(this.form);
+                const urlEncoded = new URLSearchParams(formData).toString();
+                const csrfTokenInput = this.form.querySelector('[name=csrfmiddlewaretoken]');
+                const csrfToken = csrfTokenInput ? csrfTokenInput.value : document.querySelector('meta[name="csrfmiddlewaretoken"]').content;
+                if (!csrfToken) {
+                    console.error('CSRF token not found');
+                    if (window.toastManager) {
+                        window.toastManager.buildToast()
+                            .setMessage('CSRF token missing. Please refresh the page.')
+                            .setType('danger')
+                            .setPosition('top-right')
+                            .show();
+                    } else {
+                        console.warn('toastManager not defined, skipping toast');
+                        alert('CSRF token missing. Please refresh the page.');
+                    }
+                    this.hideLoading();
+                    return;
+                }
+                try {
+                    const response = await fetch(this.form.action || window.location.href, {
+                        method: this.form.method,
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'X-CSRFToken': csrfToken
+                        },
+                        body: urlEncoded
+                    });
+                    if (response.redirected) {
+                        window.location.href = response.url;
+                        return;
+                    }
+                    const data = await response.json();
+                    if (data.success) {
+                        if (window.toastManager) {
+                            window.toastManager.buildToast()
+                                .setMessage(data.message)
+                                .setType('success')
+                                .setPosition('top-right')
+                                .show();
+                        } else {
+                            console.warn('toastManager not defined, skipping toast');
+                            alert(data.message);
+                        }
+                    } else {
+                        if (window.toastManager) {
+                            window.toastManager.buildToast()
+                                .setMessage(data.message || 'An error occurred.')
+                                .setType('danger')
+                                .setPosition('top-right')
+                                .show();
+                        } else {
+                            console.warn('toastManager not defined, skipping toast');
+                            alert(data.message || 'An error occurred.');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Form submission error:', error);
+                    if (window.toastManager) {
+                        window.toastManager.buildToast()
+                            .setMessage('An error occurred. Please try again.')
+                            .setType('danger')
+                            .setPosition('top-right')
+                            .show();
+                    } else {
+                        console.warn('toastManager not defined, skipping toast');
+                        alert('An error occurred. Please try again.');
+                    }
+                } finally {
+                    this.hideLoading();
+                }
+            }
+            showLoading() {
+                if (this.submitButton) {
+                    this.submitButton.disabled = true;
+                    this.submitButton.innerHTML = `<span class="loader"></span> ${this.originalButtonText}`;
+                }
+            }
+            hideLoading() {
+                if (this.submitButton) {
+                    this.submitButton.disabled = false;
+                    this.submitButton.innerHTML = this.originalButtonText;
+                }
+            }
+        }
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Base DOM loaded, initializing FormHandler');
+            document.querySelectorAll('form:not(#start-chat-form):not(#message-form):not(#profile-settings-form)').forEach(form => {
+                console.log('Initializing FormHandler for form:', form.id);
+                new FormHandler(form);
+            });
+            // Only show Django messages for non-AJAX requests
+            {% if messages and not request.is_ajax %}
+                {% for message in messages %}
+                    console.log('Showing Django message:', "{{ message }}");
+                    if (window.toastManager) {
+                        window.toastManager.buildToast()
+                            .setMessage("{{ message }}")
+                            .setType("{% if message.tags %}{{ message.tags }}{% else %}info{% endif %}")
+                            .setPosition("top-right")
+                            .show();
+                    } else {
+                        console.warn('toastManager not defined, skipping Django messages');
+                        alert("{{ message }}");
+                    }
+                {% endfor %}
+            {% endif %}
+        });
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
